@@ -24,7 +24,7 @@ File                 loopFile;
 enum State { IDLE, RECORDING, PLAYING, PAUSE };
 State loopState = IDLE;
 
-const int buttonPins[] = {2, 3, 4, 5, 6, 7, 8, 9, 17, 18, 19}; 
+const int btnPins[] = {30, 31, 32, 33, 34, 35, 36, 37, 38, 40, 41};
 const int numButtons = 11;
 Bounce buttons[numButtons];
 
