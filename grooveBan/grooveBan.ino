@@ -61,7 +61,7 @@ long pos1 = -999, pos2 = -999;
 
 void setup() {
   Serial.begin(9600);
-  
+  Serial.print("setting up ");
   // Set all buttons as input with internal pull-up
   for (int i = 0; i < numButtons; i++) {
     pinMode(buttonPins[i], INPUT_PULLUP);
@@ -71,11 +71,12 @@ void setup() {
 void loop() {
   // Always check inputs
   handleEncoders();
-  handleButtons();
+  //handleButtons();
 }
 
 void handleEncoders() {
   long newPos1 = enc1.read();
+  Serial.print(" enconder "+ newPos1);
   if (newPos1 != pos1) {
     pos1 = newPos1;
     // USE THIS: Map encoder 1 to change a parameter (e.g., volume or pitch)

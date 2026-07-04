@@ -52,9 +52,10 @@ Encoder enc2(28, 29);
 const int buttonPins[] = {30, 31, 32, 33, 34, 35, 36, 37, 38, 40, 41};
 const int numButtons = 11;
 unsigned long lastDebounceTime[11] = {0};
-const unsigned long debounceDelay = 50;
+const unsigned long debounceDelay = 500;
 
 // --- Variables ---
+long oldPos =0;
 long pos1 = -999;
 int currentKeyIndex = 0;
 long lastEncPos = 0;
@@ -75,70 +76,90 @@ const char* keyNames[] = {"A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", 
 void setup() {
 
   Serial.begin(9600);
-    Serial.print("start setup ");
-  /*AudioMemory(16);
+    Serial.println("start setup ");
+  AudioMemory(16);
   sgtl5000_1.enable();
   sgtl5000_1.volume(0.5);
   if (!(SD.begin(BUILTIN_SDCARD))) {
     Serial.println("SD Card Error: Check if FAT32 formatted");
     while(1); 
   }
-*/
-Serial.print("start setup");
+
+Serial.println("start Loop");
   for (int i = 0; i < numButtons; i++) {
     pinMode(buttonPins[i], INPUT_PULLUP);
   }
-  Serial.print("done setup");
+  Serial.println("done setup");
 }
 
 void loop() {
-  long newPos = enc2.read();
-  Serial.print("this is encouder: "+ newPos);
-  //handleVolume();
-  //ChangeKey();
-  //handleButtons();
+  // put your main code here, to run repeatedly:
+    long newPos = enc2.read();
+    if(newPos != oldPos ){
+        Serial.println("this is encouder: ");
+        Serial.println(newPos);
+        oldPos= newPos;
+    }
+   
+  handleButtons();
+
 }
 
 void handleButtons() {
+
   unsigned long currentMillis = millis();
+
+
   for (int i = 0; i < numButtons; i++) {
-    if (digitalRead(buttonPins[i]) == LOW && (currentMillis - lastDebounceTime[i] > debounceDelay)) {
-      triggerInstrument(i);
+        if (digitalRead(buttonPins[i]) == LOW){
+      // Serial.println("inButt: ");
+       if(currentMillis - lastDebounceTime[i] > debounceDelay){
+          Serial.println("currentMillis: ");
+          Serial.println(currentMillis);
+         Serial.println("LastDebounceTime");
+          Serial.println(lastDebounceTime[i]);
+           Serial.println("DebounceDelay ");
+           Serial.println(debounceDelay);
+
+        Serial.println("finally ");
+        lastDebounceTime[0] = currentMillis;
+        triggerInstrument(i);
       lastDebounceTime[i] = currentMillis;
+       }
+      // Serial.println("inButt: ");
+
+    }
+    //if  (currentMillis - lastDebounceTime[i] > debounceDelay) {Serial.println("is biger");}
+    if (digitalRead(buttonPins[i]) == LOW && (currentMillis - lastDebounceTime[i] > debounceDelay)) {
+     // Serial.println("it does work");
+
     }
   }
 }
 
 void triggerInstrument(int index) {
   switch(index) {
-    case 0: pianoSdWav6.play("Instruments/piano/E.WAV"); break;// pin 30
-    case 1: PianoSdWav9.play("Instruments/piano/C.WAV"); break;//// pin 31
-    case 2: PianoSdWav10.play("Instruments/piano/G.WAV"); break;//// pin 32
-    case 3: PianoSdWav7.play("Instruments/piano/B.WAV"); break;// pin 30
-    case 6: KickSDWay.play("Instruments/drums/kick.WAV"); break;
-    case 7: SnareSdWav2.play("Instruments/drums/snare.WAV"); break;
-    case 8: HigHatSdWav3.play("Instruments/drums/hi-hat.WAV"); break;
-  }
-}
-
-void handleVolume() {
-  long newPos1 = enc1.read();
-  if (newPos1 != pos1) {
-    pos1 = newPos1;
-    float newVolume = constrain(pos1 / 100.0, 0.0, 1.0);
-    sgtl5000_1.volume(newVolume);
-  }
-}
-
-void ChangeKey() {
-  long newPos = enc2.read();
-  Serial.print("this is encouder: "+ newPos);
-  int delta = (newPos - lastEncPos) / 4; 
-  if (delta != 0) {
-    currentKeyIndex = (currentKeyIndex + delta) % 12;
-    if (currentKeyIndex < 0) currentKeyIndex += 12;
-    lastEncPos = newPos;
-    Serial.print("Key: "); 
-    Serial.println(keyNames[currentKeyIndex]);
+    case 0: 
+      pianoSdWav6.play("Instruments/piano/E.wav"); 
+      Serial.println("Playing E note"); 
+      break;
+    case 1: 
+      PianoSdWav9.play("Instruments/piano/C .wav"); // Note the space
+      break;
+    case 2: 
+      PianoSdWav10.play("Instruments/piano/G.wav"); // Ensure casing matches
+      break;
+    case 3: 
+      PianoSdWav7.play("Instruments/piano/B.wav");  // Assuming you fix the 'Bwav' typo
+      break;
+    case 6: 
+      KickSDWay.play("Instruments/drums/kick.wav"); 
+      break;
+    case 7: 
+      SnareSdWav2.play("Instruments/drums/snare.wav"); 
+      break;
+    case 8: 
+      HigHatSdWav3.play("Instruments/drums/hi-hat.wav"); 
+      break;
   }
 }
