@@ -3,8 +3,7 @@
 #include <Wire.h>
 #include <SPI.h>
 #include <SD.h>
-#include <SerialFlash.h>
-//SD.open("looper/loop1.wav", FILE_WRITE)
+
 // --- Audio Objects ---
 AudioPlaySdWav           KickSDWay;
 AudioPlaySdWav           BassSdWav4;
@@ -14,6 +13,7 @@ AudioPlaySdWav           pianoSdWav6;
 AudioPlaySdWav           PianoSdWav9;
 AudioPlaySdWav           PianoSdWav10;
 AudioPlaySdWav           PianoSdWav7;
+
 AudioMixer4              Pianomixer3;
 AudioMixer4              Bassmixer4;
 AudioMixer4              Pianomixer1;
@@ -21,7 +21,7 @@ AudioMixer4              mixer2;
 AudioMixer4              mixer5;
 AudioOutputI2S           i2s1;
 
-// --- Patch Cords ---
+// --- Patch Cords (Ensure these match your Design Tool export) ---
 AudioConnection          patchCord1(KickSDWay, 0, Bassmixer4, 0);
 AudioConnection          patchCord2(KickSDWay, 1, Bassmixer4, 1);
 AudioConnection          patchCord3(BassSdWav4, 0, Bassmixer4, 2);
@@ -47,119 +47,74 @@ AudioConnection          patchCord22(mixer5, 0, i2s1, 1);
 AudioControlSGTL5000     sgtl5000_1;
 
 // --- Hardware Inputs ---
-Encoder enc1(26, 27);
 Encoder enc2(28, 29);
 const int buttonPins[] = {30, 31, 32, 33, 34, 35, 36, 37, 38, 40, 41};
 const int numButtons = 11;
 unsigned long lastDebounceTime[11] = {0};
-const unsigned long debounceDelay = 500;
+const unsigned long debounceDelay = 250; // Shortened for responsiveness
 
 // --- Variables ---
-long oldPos =0;
-long pos1 = -999;
-int currentKeyIndex = 0;
-long lastEncPos = 0;
-const char* keyNames[] = {"A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"};
-/*
-  1 skip an inex 
-  2 skip an index
-  3 go to the next index
-  4 skip an index
-  5 skip an index
-  6 skip an inex 
-  7 skip an index
-  8 next index but octave
+float volume = 0.5;
+long oldPos = -999;
 
-
-  
-*/
 void setup() {
-
   Serial.begin(9600);
-    Serial.println("start setup ");
-  AudioMemory(16);
+  AudioMemory(150); // Increased for stability with multiple players
+  
   sgtl5000_1.enable();
-  sgtl5000_1.volume(0.5);
+  sgtl5000_1.volume(volume);
+  
   if (!(SD.begin(BUILTIN_SDCARD))) {
-    Serial.println("SD Card Error: Check if FAT32 formatted");
+    Serial.println("SD Card Error");
     while(1); 
   }
 
-Serial.println("start Loop");
   for (int i = 0; i < numButtons; i++) {
     pinMode(buttonPins[i], INPUT_PULLUP);
   }
-  Serial.println("done setup");
+  Serial.println("Setup Complete");
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-    long newPos = enc2.read();
-    if(newPos != oldPos ){
-        Serial.println("this is encouder: ");
-        Serial.println(newPos);
-        oldPos= newPos;
-    }
-   
+  handleEncoder();
   handleButtons();
+}
 
+void handleEncoder(){
+  long newPos = enc2.read() / 4; // Dividing by 4 for typical encoder detents
+  if (newPos != oldPos) {
+    if (newPos > oldPos) volume += 0.05;
+    else volume -= 0.05;
+    
+    volume = constrain(volume, 0.0, 1.0);
+    sgtl5000_1.volume(volume);
+    oldPos = newPos;
+    Serial.print("Volume: "); Serial.println(volume);
+  }
 }
 
 void handleButtons() {
-
   unsigned long currentMillis = millis();
-
-
   for (int i = 0; i < numButtons; i++) {
-        if (digitalRead(buttonPins[i]) == LOW){
-      // Serial.println("inButt: ");
-       if(currentMillis - lastDebounceTime[i] > debounceDelay){
-          Serial.println("currentMillis: ");
-          Serial.println(currentMillis);
-         Serial.println("LastDebounceTime");
-          Serial.println(lastDebounceTime[i]);
-           Serial.println("DebounceDelay ");
-           Serial.println(debounceDelay);
-
-        Serial.println("finally ");
-        lastDebounceTime[0] = currentMillis;
-        triggerInstrument(i);
-      lastDebounceTime[i] = currentMillis;
+    if (digitalRead(buttonPins[i]) == LOW) {
+       if (currentMillis - lastDebounceTime[i] > debounceDelay) {
+          triggerInstrument(i);
+          lastDebounceTime[i] = currentMillis; 
        }
-      // Serial.println("inButt: ");
-
-    }
-    //if  (currentMillis - lastDebounceTime[i] > debounceDelay) {Serial.println("is biger");}
-    if (digitalRead(buttonPins[i]) == LOW && (currentMillis - lastDebounceTime[i] > debounceDelay)) {
-     // Serial.println("it does work");
-
     }
   }
 }
 
 void triggerInstrument(int index) {
+  Serial.println("triggers index :");
+  Serial.println(index);
   switch(index) {
-    case 0: 
-      pianoSdWav6.play("Instruments/piano/E.wav"); 
-      Serial.println("Playing E note"); 
-      break;
-    case 1: 
-      PianoSdWav9.play("Instruments/piano/C .wav"); // Note the space
-      break;
-    case 2: 
-      PianoSdWav10.play("Instruments/piano/G.wav"); // Ensure casing matches
-      break;
-    case 3: 
-      PianoSdWav7.play("Instruments/piano/B.wav");  // Assuming you fix the 'Bwav' typo
-      break;
-    case 6: 
-      KickSDWay.play("Instruments/drums/kick.wav"); 
-      break;
-    case 7: 
-      SnareSdWav2.play("Instruments/drums/snare.wav"); 
-      break;
-    case 8: 
-      HigHatSdWav3.play("Instruments/drums/hi-hat.wav"); 
-      break;
+    case 0: pianoSdWav6.play("C.wav"); break;
+    case 1: PianoSdWav9.play("D.wav"); break;
+    case 2: PianoSdWav10.play("E.wav"); break;
+    case 3: PianoSdWav7.play("F.wav"); break;
+    case 6: KickSDWay.play("G.wav"); break;
+    case 7: SnareSdWav2.play("A.wav"); break;
+    case 8: HigHatSdWav3.play("B.wav"); break;
   }
 }
