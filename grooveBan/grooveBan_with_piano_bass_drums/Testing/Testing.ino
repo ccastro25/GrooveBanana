@@ -1,43 +1,24 @@
-#include <Encoder.h>
 #include <Audio.h>
 #include <Wire.h>
 #include <SPI.h>
 #include <SD.h>
+#include <Encoder.h>
+#include <Bounce.h>
 
-// --- Audio Objects ---
-AudioPlaySdWav           KickSDWay;
+// --- Audio Objects (Merged) ---
+// Using 8 players for Voice Stealing logic
+const int numPlayers = 8;
+AudioPlaySdWav           players[numPlayers];
+AudioPlaySdWav           KickSDWay; // Kept as specific players for drums
 AudioPlaySdWav           BassSdWav4;
 AudioPlaySdWav           HigHatSdWav3;
 AudioPlaySdWav           SnareSdWav2;
-AudioPlaySdWav           pianoSdWav6;
-AudioPlaySdWav           PianoSdWav9;
-AudioPlaySdWav           PianoSdWav10;
-AudioPlaySdWav           PianoSdWav7;
 
-AudioMixer4              Pianomixer3;
-AudioMixer4              Bassmixer4;
-AudioMixer4              Pianomixer1;
-AudioMixer4              mixer2;
-AudioMixer4              mixer5;
+AudioMixer4              Pianomixer3, Bassmixer4, Pianomixer1, mixer2, mixer5;
 AudioOutputI2S           i2s1;
 
-// --- Patch Cords (Ensure these match your Design Tool export) ---
+// --- Patch Cords ---
 AudioConnection          patchCord1(KickSDWay, 0, Bassmixer4, 0);
-AudioConnection          patchCord2(KickSDWay, 1, Bassmixer4, 1);
-AudioConnection          patchCord3(BassSdWav4, 0, Bassmixer4, 2);
-AudioConnection          patchCord4(BassSdWav4, 1, Bassmixer4, 3);
-AudioConnection          patchCord5(HigHatSdWav3, 0, mixer2, 2);
-AudioConnection          patchCord6(HigHatSdWav3, 1, mixer2, 3);
-AudioConnection          patchCord7(SnareSdWav2, 0, mixer2, 0);
-AudioConnection          patchCord8(SnareSdWav2, 1, mixer2, 1);
-AudioConnection          patchCord9(pianoSdWav6, 0, Pianomixer1, 0);
-AudioConnection          patchCord10(pianoSdWav6, 1, Pianomixer1, 1);
-AudioConnection          patchCord11(PianoSdWav9, 0, Pianomixer3, 0);
-AudioConnection          patchCord12(PianoSdWav9, 1, Pianomixer3, 1);
-AudioConnection          patchCord13(PianoSdWav10, 0, Pianomixer3, 2);
-AudioConnection          patchCord14(PianoSdWav10, 1, Pianomixer3, 3);
-AudioConnection          patchCord15(PianoSdWav7, 0, Pianomixer1, 2);
-AudioConnection          patchCord16(PianoSdWav7, 1, Pianomixer1, 3);
 AudioConnection          patchCord17(Pianomixer3, 0, mixer5, 3);
 AudioConnection          patchCord18(Bassmixer4, 0, mixer5, 1);
 AudioConnection          patchCord19(Pianomixer1, 0, mixer5, 2);
@@ -46,90 +27,107 @@ AudioConnection          patchCord21(mixer5, 0, i2s1, 0);
 AudioConnection          patchCord22(mixer5, 0, i2s1, 1);
 AudioControlSGTL5000     sgtl5000_1;
 
-// --- Hardware Inputs ---
-Encoder enc2(28, 29);
-const int buttonPins[] = {30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40};
-const int numButtons = 11;
-unsigned long lastDebounceTime[11] = {0};
-const unsigned long debounceDelay = 250; // Shortened for responsiveness
+// --- Inputs ---
+const int numButtons = 8;
+const int buttonPins[] = {2, 3, 4, 7, 8, 9, 14, 15};
+Bounce buttons[numButtons] = {
+  Bounce(buttonPins[0], 8), Bounce(buttonPins[1], 8), Bounce(buttonPins[2], 8),
+  Bounce(buttonPins[3], 8), Bounce(buttonPins[4], 8), Bounce(buttonPins[5], 8),
+  Bounce(buttonPins[6], 8), Bounce(buttonPins[7], 8)
+};
 
-// --- Variables ---
+Encoder enc2(5, 6);
+long lastEncPos = 0;
 float volume = 0.5;
-long oldPos = -999;
+
+// --- Scale & Key Data ---
+int nextVoice = 0;
+int currentKeyIndex = 0;
+const char* keyNames[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+int majorScale[] = {0, 2, 4, 5, 7, 9, 11}; 
+const char* noteFiles[] = {"C0.wav", "C#0.wav", "D0.wav", "D#0.wav", "E0.wav", "F0.wav", "F#0.wav", "G0.wav", "G#0.wav", "A0.wav", "A#0.wav", "B0.wav"};
 
 void setup() {
   Serial.begin(9600);
-  AudioMemory(250); // Increased for stability with multiple players
-  
+  AudioMemory(500);
   sgtl5000_1.enable();
   sgtl5000_1.volume(volume);
-  
-  if (!(SD.begin(BUILTIN_SDCARD))) {
-    Serial.println("SD Card Error");
-    while(1); 
-  }
-
-  for (int i = 0; i < numButtons; i++) {
-    pinMode(buttonPins[i], INPUT_PULLUP);
-  }
-  Serial.println("Setup Complete");
+  if (!(SD.begin(BUILTIN_SDCARD))) Serial.println("SD Error");
+  for(int i = 0; i < numButtons; i++) pinMode(buttonPins[i], INPUT_PULLUP);
 }
 
 void loop() {
-  handleEncoder();
   handleButtons();
+  ChangeKey();
 }
 
-void handleEncoder(){
-  long newPos = enc2.read() / 4; // Dividing by 4 for typical encoder detents
-  if (newPos != oldPos) {
-    if (newPos > oldPos) volume += 0.05;
-    else volume -= 0.05;
-    
-    volume = constrain(volume, 0.0, 1.0);
-    sgtl5000_1.volume(volume);
-    oldPos = newPos;
-    Serial.print("Volume: "); Serial.println(volume);
-  }
-}
-
+// --- Interaction Logic ---
 void handleButtons() {
-  unsigned long currentMillis = millis();
   for (int i = 0; i < numButtons; i++) {
-    if (digitalRead(buttonPins[i]) == LOW) {
-       if (currentMillis - lastDebounceTime[i] > debounceDelay) {
-          triggerInstrument(i);
-          lastDebounceTime[i] = currentMillis; 
-       }
+    buttons[i].update();
+    if (buttons[i].fallingEdge()) {
+      // You can mix direct trigger or chord trigger logic here
+      playChord(i); 
     }
   }
 }
+
 void ChangeKey() {
   long newPos = enc2.read();
-  Serial.print("this is encouder: "+ newPos);
   int delta = (newPos - lastEncPos) / 4; 
   if (delta != 0) {
     currentKeyIndex = (currentKeyIndex + delta) % 12;
     if (currentKeyIndex < 0) currentKeyIndex += 12;
     lastEncPos = newPos;
-    Serial.print("Key: "); 
-    Serial.println(keyNames[currentKeyIndex]);
-  }
-void triggerInstrument(int index) {
-  Serial.println("triggers index :");
-  Serial.println(index);
-  switch(index) {
-    case 3: pianoSdWav6.play("C.wav"); break;
-    case 4: PianoSdWav9.play("D.wav"); break;
-    case 5: PianoSdWav10.play("E.wav"); break;
-    case 6: PianoSdWav7.play("F.wav"); break;
-    case 7: KickSDWay.play("G.wav"); break;
-    case 8: SnareSdWav2.play("A.wav"); break;
-    case 9: HigHatSdWav3.play("B.wav"); break;
-    case 10: HigHatSdWav3.play("C1.wav"); break;
+    Serial.print("New Key: "); Serial.println(keyNames[currentKeyIndex]);
   }
 }
+
+// --- Voice & Chord Logic ---
+void playVoice(int semitone) {
+  int targetNote = (currentKeyIndex + semitone) % 12;
+  players[nextVoice].stop();
+  players[nextVoice].play(noteFiles[targetNote]);
+  nextVoice = (nextVoice + 1) % numPlayers;
+}
+
+void playChord(int rootDegree) {
+  int d1 = majorScale[rootDegree % 7];
+  int d2 = majorScale[(rootDegree + 2) % 7];
+  int d3 = majorScale[(rootDegree + 4) % 7];
+  playVoice(d1);
+  playVoice(d2);
+  playVoice(d3);
+}
+
 /*
+
+
+
+for chords 
+void playChord(const char* note1, const char* note2, const char* note3) {
+  // Use a simple "Round Robin" or static assignment to your players
+  pianoSdWav6.play(note1);
+  PianoSdWav9.play(note2);
+  PianoSdWav10.play(note3);
+}
+
+void triggerInstrument(int index) {
+  switch(index) {
+    case 0: // C Major Button
+      playChord("C.wav", "E.wav", "G.wav"); 
+      break;
+    case 1: // D Minor Button
+      playChord("D.wav", "F.wav", "A.wav"); 
+      break;
+    // ... etc
+  }
+}
+
+
+--------------------------------------------------------
+
+
 #include <Encoder.h>
 #include <Metro.h>
 
