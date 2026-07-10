@@ -48,7 +48,7 @@ AudioControlSGTL5000     sgtl5000_1;
 
 // --- Hardware Inputs ---
 Encoder enc2(28, 29);
-const int buttonPins[] = {30, 31, 32, 33, 34, 35, 36, 37, 38, 40, 41};
+const int buttonPins[] = {30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40};
 const int numButtons = 11;
 unsigned long lastDebounceTime[11] = {0};
 const unsigned long debounceDelay = 250; // Shortened for responsiveness
@@ -59,7 +59,7 @@ long oldPos = -999;
 
 void setup() {
   Serial.begin(9600);
-  AudioMemory(150); // Increased for stability with multiple players
+  AudioMemory(250); // Increased for stability with multiple players
   
   sgtl5000_1.enable();
   sgtl5000_1.volume(volume);
@@ -104,17 +104,84 @@ void handleButtons() {
     }
   }
 }
-
+void ChangeKey() {
+  long newPos = enc2.read();
+  Serial.print("this is encouder: "+ newPos);
+  int delta = (newPos - lastEncPos) / 4; 
+  if (delta != 0) {
+    currentKeyIndex = (currentKeyIndex + delta) % 12;
+    if (currentKeyIndex < 0) currentKeyIndex += 12;
+    lastEncPos = newPos;
+    Serial.print("Key: "); 
+    Serial.println(keyNames[currentKeyIndex]);
+  }
 void triggerInstrument(int index) {
   Serial.println("triggers index :");
   Serial.println(index);
   switch(index) {
-    case 0: pianoSdWav6.play("C.wav"); break;
-    case 1: PianoSdWav9.play("D.wav"); break;
-    case 2: PianoSdWav10.play("E.wav"); break;
-    case 3: PianoSdWav7.play("F.wav"); break;
-    case 6: KickSDWay.play("G.wav"); break;
-    case 7: SnareSdWav2.play("A.wav"); break;
-    case 8: HigHatSdWav3.play("B.wav"); break;
+    case 3: pianoSdWav6.play("C.wav"); break;
+    case 4: PianoSdWav9.play("D.wav"); break;
+    case 5: PianoSdWav10.play("E.wav"); break;
+    case 6: PianoSdWav7.play("F.wav"); break;
+    case 7: KickSDWay.play("G.wav"); break;
+    case 8: SnareSdWav2.play("A.wav"); break;
+    case 9: HigHatSdWav3.play("B.wav"); break;
+    case 10: HigHatSdWav3.play("C1.wav"); break;
   }
 }
+/*
+#include <Encoder.h>
+#include <Metro.h>
+
+// Initialize encoder on pins 5 and 6
+Encoder myEnc(5, 6);
+
+// Set initial BPM and constraints
+int currentBpm = 120;
+const int MIN_BPM = 40;
+const int MAX_BPM = 240;
+
+// Set up the metronome timer
+long interval = 60000 / currentBpm;
+Metro metronome = Metro(interval);
+
+// Track the previous encoder position
+long oldPosition  = -999;
+
+void setup() {
+  pinMode(9, OUTPUT); // Click output pin
+  Serial.begin(9600);
+}
+
+void loop() {
+  // 1. Read encoder position (divide by 4 for standard 4-step encoders)
+  long newPosition = myEnc.read() / 4;
+  
+  if (newPosition != oldPosition) {
+    // Calculate new BPM based on encoder movement direction
+    int change = newPosition - oldPosition;
+    currentBpm += change;
+    
+    // Keep BPM within safe musical limits
+    currentBpm = constrain(currentBpm, MIN_BPM, MAX_BPM);
+    
+    // Update the metronome timing interval instantly
+    long newInterval = 60000 / currentBpm;
+    metronome.interval(newInterval);
+    
+    // Print updated tempo to Serial Monitor
+    Serial.print("Tempo: ");
+    Serial.concat(currentBpm);
+    Serial.println(" BPM");
+    
+    oldPosition = newPosition;
+  }
+
+  // 2. Fire the metronome click
+  if (metronome.check()) {
+    digitalWrite(9, HIGH);
+    delay(20); // Short pulse for a crisp click sound
+    digitalWrite(9, LOW);
+  }
+}
+*/
