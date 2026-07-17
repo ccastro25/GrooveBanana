@@ -4,12 +4,14 @@
 #include <SD.h>
 #include <Encoder.h>
 #include <Bounce.h>
+#include <Metro.h>
 
-// --- Audio Objects (Merged) ---
-// Using 8 players for Voice Stealing logic
-const int numPlayers = 8;
+Metro debugTimer = Metro(1000);
+
+// --- Audio Objects ---
+const int numPlayers = 5; // Updated to 5
 AudioPlaySdWav           players[numPlayers];
-AudioPlaySdWav           KickSDWay; // Kept as specific players for drums
+AudioPlaySdWav           KickSDWay;
 AudioPlaySdWav           BassSdWav4;
 AudioPlaySdWav           HigHatSdWav3;
 AudioPlaySdWav           SnareSdWav2;
@@ -25,16 +27,28 @@ AudioConnection          patchCord19(Pianomixer1, 0, mixer5, 2);
 AudioConnection          patchCord20(mixer2, 0, mixer5, 0);
 AudioConnection          patchCord21(mixer5, 0, i2s1, 0);
 AudioConnection          patchCord22(mixer5, 0, i2s1, 1);
+
+// Connected 5 players to your input mixers
+AudioConnection          p0(players[0], 0, mixer2, 0);
+AudioConnection          p1(players[1], 0, mixer2, 1);
+AudioConnection          p2(players[2], 0, Pianomixer1, 0);
+AudioConnection          p3(players[3], 0, Pianomixer1, 1);
+AudioConnection          p4(players[4], 0, Pianomixer3, 0);
+
 AudioControlSGTL5000     sgtl5000_1;
 
 // --- Inputs ---
 const int numButtons = 8;
-const int buttonPins[] = {2, 3, 4, 7, 8, 9, 14, 15};
+const int buttonPins[] = {33, 34, 35, 36, 37, 38, 39, 40};
 Bounce buttons[numButtons] = {
-  Bounce(buttonPins[0], 8), Bounce(buttonPins[1], 8), Bounce(buttonPins[2], 8),
-  Bounce(buttonPins[3], 8), Bounce(buttonPins[4], 8), Bounce(buttonPins[5], 8),
-  Bounce(buttonPins[6], 8), Bounce(buttonPins[7], 8)
+  Bounce(buttonPins[0], 2), Bounce(buttonPins[1], 2), Bounce(buttonPins[2], 2),
+  Bounce(buttonPins[3], 2), Bounce(buttonPins[4], 2), Bounce(buttonPins[5], 2),
+  Bounce(buttonPins[6], 2), Bounce(buttonPins[7], 2)
 };
+
+// --- Timing & Cooldown ---
+unsigned long lastChordTime = 0;
+const unsigned long SD_COOLDOWN = 100;
 
 Encoder enc2(5, 6);
 long lastEncPos = 0;
@@ -45,84 +59,66 @@ int nextVoice = 0;
 int currentKeyIndex = 0;
 const char* keyNames[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 int majorScale[] = {0, 2, 4, 5, 7, 9, 11}; 
-const char* noteFiles[] = {"C0.wav", "C#0.wav", "D0.wav", "D#0.wav", "E0.wav", "F0.wav", "F#0.wav", "G0.wav", "G#0.wav", "A0.wav", "A#0.wav", "B0.wav"};
+const char* noteFiles[] = {"C.wav", "C#.wav", "D.wav", "D#.wav", "E.wav", "F.wav", "F#.wav", "G.wav", "G#.wav", "A.wav", "A#.wav", "B.wav"};
 
 void setup() {
   Serial.begin(9600);
   AudioMemory(500);
   sgtl5000_1.enable();
   sgtl5000_1.volume(volume);
+
+  Bassmixer4.gain(0, 0.8); 
+  mixer5.gain(0, 0.8); mixer5.gain(1, 0.8); mixer5.gain(2, 0.8); mixer5.gain(3, 0.8);
+  Pianomixer3.gain(0, 0.8); Pianomixer1.gain(0, 0.8); mixer2.gain(0, 0.8);
+  
   if (!(SD.begin(BUILTIN_SDCARD))) Serial.println("SD Error");
   for(int i = 0; i < numButtons; i++) pinMode(buttonPins[i], INPUT_PULLUP);
 }
 
 void loop() {
+  debug();
   handleButtons();
-  ChangeKey();
 }
 
-// --- Interaction Logic ---
+void debug(){
+  if (debugTimer.check()) {
+    Serial.print("Proc: "); Serial.print(AudioProcessorUsage());
+    Serial.print("% | Mem: "); Serial.println(AudioMemoryUsage());
+  }
+}
+
 void handleButtons() {
   for (int i = 0; i < numButtons; i++) {
     buttons[i].update();
     if (buttons[i].fallingEdge()) {
-      // You can mix direct trigger or chord trigger logic here
       playChord(i); 
     }
   }
 }
 
-void ChangeKey() {
-  long newPos = enc2.read();
-  int delta = (newPos - lastEncPos) / 4; 
-  if (delta != 0) {
-    currentKeyIndex = (currentKeyIndex + delta) % 12;
-    if (currentKeyIndex < 0) currentKeyIndex += 12;
-    lastEncPos = newPos;
-    Serial.print("New Key: "); Serial.println(keyNames[currentKeyIndex]);
+void playVoice(int semitone) {
+  int targetNote = (currentKeyIndex + semitone) % 12;
+  const char* filename = noteFiles[targetNote];
+
+  if (SD.exists(filename)) {
+    players[nextVoice].stop();
+    players[nextVoice].play(filename);
+    nextVoice = (nextVoice + 1) % numPlayers;
   }
 }
 
-// --- Voice & Chord Logic ---
-void playVoice(int semitone) {
-  int targetNote = (currentKeyIndex + semitone) % 12;
-  players[nextVoice].stop();
-  players[nextVoice].play(noteFiles[targetNote]);
-  nextVoice = (nextVoice + 1) % numPlayers;
-}
-
 void playChord(int rootDegree) {
-  int d1 = majorScale[rootDegree % 7];
-  int d2 = majorScale[(rootDegree + 2) % 7];
-  int d3 = majorScale[(rootDegree + 4) % 7];
-  playVoice(d1);
-  playVoice(d2);
-  playVoice(d3);
+  if (millis() - lastChordTime < SD_COOLDOWN) return;
+  
+  playVoice(majorScale[rootDegree % 7]);
+  playVoice(majorScale[(rootDegree + 2) % 7]);
+  playVoice(majorScale[(rootDegree + 4) % 7]);
+  
+  lastChordTime = millis();
 }
 
 /*
 
-
-
-for chords 
-void playChord(const char* note1, const char* note2, const char* note3) {
-  // Use a simple "Round Robin" or static assignment to your players
-  pianoSdWav6.play(note1);
-  PianoSdWav9.play(note2);
-  PianoSdWav10.play(note3);
-}
-
-void triggerInstrument(int index) {
-  switch(index) {
-    case 0: // C Major Button
-      playChord("C.wav", "E.wav", "G.wav"); 
-      break;
-    case 1: // D Minor Button
-      playChord("D.wav", "F.wav", "A.wav"); 
-      break;
-    // ... etc
-  }
-}
 
 
 --------------------------------------------------------
