@@ -74,6 +74,10 @@ void setup() {
   Pianomixer3.gain(0, 0.8); Pianomixer1.gain(0, 0.8); mixer2.gain(0, 0.8);
   
   if (!(SD.begin(BUILTIN_SDCARD))) Serial.println("SD Error");
+  Serial.println("SD Initialized. Listing files:");
+    File root = SD.open("/");
+    printDirectory(root, 0);
+    root.close();
   for(int i = 0; i < numButtons; i++) pinMode(buttonPins[i], INPUT_PULLUP);
 }
 
@@ -137,7 +141,28 @@ void playChord(int rootDegree) {
   
   lastChordTime = millis();
 }
-
+void printDirectory(File dir, int numTabs) {
+  while (true) {
+    File entry = dir.openNextFile();
+    if (!entry) {
+      // No more files
+      break;
+    }
+    for (uint8_t i = 0; i < numTabs; i++) {
+      Serial.print('\t');
+    }
+    Serial.print(entry.name());
+    if (entry.isDirectory()) {
+      Serial.println("/");
+      printDirectory(entry, numTabs + 1);
+    } else {
+      // Print file size
+      Serial.print("\t\t");
+      Serial.println(entry.size(), DEC);
+    }
+    entry.close();
+  }
+}
 /*
 
 
