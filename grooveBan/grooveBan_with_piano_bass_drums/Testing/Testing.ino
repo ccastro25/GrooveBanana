@@ -6,6 +6,8 @@
 #include <Bounce.h>
 #include <Metro.h>
 
+// Add this global variable to track your folder state
+bool useFolder01 = false; 
 Metro debugTimer = Metro(1000);
 
 // --- Audio Objects ---
@@ -96,17 +98,36 @@ void handleButtons() {
   }
 }
 
+
 void playVoice(int semitone) {
   int targetNote = (currentKeyIndex + semitone) % 12;
-  const char* filename = noteFiles[targetNote];
+  
+  // Toggle the folder selection
+  useFolder01 = !useFolder01;
+  
+  // Construct the path string dynamically
+  char filename[32];
+  if (useFolder01) {
+    snprintf(filename, sizeof(filename), "piano01/%s", noteFiles[targetNote]);
+  } else {
+    snprintf(filename, sizeof(filename), "piano00/%s", noteFiles[targetNote]);
+  }
 
+  // 1. Check if the file exists in the selected folder
   if (SD.exists(filename)) {
+    Serial.print("Playing: ");
+    Serial.println(filename);
+    
+    // 2. Play the sound
     players[nextVoice].stop();
     players[nextVoice].play(filename);
+    
     nextVoice = (nextVoice + 1) % numPlayers;
+  } else {
+    Serial.print("File not found: ");
+    Serial.println(filename);
   }
 }
-
 void playChord(int rootDegree) {
   if (millis() - lastChordTime < SD_COOLDOWN) return;
   
