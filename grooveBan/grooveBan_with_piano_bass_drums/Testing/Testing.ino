@@ -6,158 +6,180 @@
 #include <Bounce.h>
 #include <Metro.h>
 
-// Add this global variable to track your folder state
-bool useFolder01 = false; 
 Metro debugTimer = Metro(1000);
 
-// --- Audio Objects ---
-const int numPlayers = 5; // Updated to 5
-AudioPlaySdWav           players[numPlayers];
-AudioPlaySdWav           KickSDWay;
-AudioPlaySdWav           BassSdWav4;
-AudioPlaySdWav           HigHatSdWav3;
-AudioPlaySdWav           SnareSdWav2;
+// ====================== AUDIO ======================
+const int numPlayers = 6;
+AudioPlayMemory players[numPlayers];
+AudioMixer4 mixer;
+AudioOutputI2S i2s1;
+AudioControlSGTL5000 sgtl5000_1;
 
-AudioMixer4              Pianomixer3, Bassmixer4, Pianomixer1, mixer2, mixer5;
-AudioOutputI2S           i2s1;
+AudioConnection* patchCords[10];
 
-// --- Patch Cords ---
-AudioConnection          patchCord1(KickSDWay, 0, Bassmixer4, 0);
-AudioConnection          patchCord17(Pianomixer3, 0, mixer5, 3);
-AudioConnection          patchCord18(Bassmixer4, 0, mixer5, 1);
-AudioConnection          patchCord19(Pianomixer1, 0, mixer5, 2);
-AudioConnection          patchCord20(mixer2, 0, mixer5, 0);
-AudioConnection          patchCord21(mixer5, 0, i2s1, 0);
-AudioConnection          patchCord22(mixer5, 0, i2s1, 1);
+// ====================== MODES ======================
+enum Mode { SCALE_MODE, CHORD_MODE, DRUM_MODE, SYNTH_MODE };
+Mode currentMode = SCALE_MODE;
 
-// Connected 5 players to your input mixers
-AudioConnection          p0(players[0], 0, mixer2, 0);
-AudioConnection          p1(players[1], 0, mixer2, 1);
-AudioConnection          p2(players[2], 0, Pianomixer1, 0);
-AudioConnection          p3(players[3], 0, Pianomixer1, 1);
-AudioConnection          p4(players[4], 0, Pianomixer3, 0);
+const char* modeNames[] = {"SCALE", "CHORD", "DRUM", "SYNTH"};
 
-AudioControlSGTL5000     sgtl5000_1;
+// ====================== KEYS ======================
+const char* rootNotes[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+int currentKey = 0;        // 0 = C
 
-// --- Inputs ---
+
+// scale format
+const int keyPattern = [0,2,4,5,7,9,11];
+
+// Sample storage
+struct Sample {
+  const unsigned int* data;
+  uint32_t len;
+};
+
+Sample samples[12] = {0};
+
+// ====================== INPUTS ======================
+Encoder enc(5, 6);
+long lastEncPos = 0;
+
 const int numButtons = 8;
 const int buttonPins[] = {33, 34, 35, 36, 37, 38, 39, 40};
 Bounce buttons[numButtons] = {
-  Bounce(buttonPins[0], 2), Bounce(buttonPins[1], 2), Bounce(buttonPins[2], 2),
-  Bounce(buttonPins[3], 2), Bounce(buttonPins[4], 2), Bounce(buttonPins[5], 2),
-  Bounce(buttonPins[6], 2), Bounce(buttonPins[7], 2)
+  Bounce(buttonPins[0], 5), Bounce(buttonPins[1], 5),
+  Bounce(buttonPins[2], 5), Bounce(buttonPins[3], 5),
+  Bounce(buttonPins[4], 5), Bounce(buttonPins[5], 5),
+  Bounce(buttonPins[6], 5), Bounce(buttonPins[7], 5)
 };
 
-// --- Timing & Cooldown ---
-unsigned long lastChordTime = 0;
-const unsigned long SD_COOLDOWN = 100;
-
-Encoder enc2(5, 6);
-long lastEncPos = 0;
-float volume = 0.5;
-
-// --- Scale & Key Data ---
+float volume = 0.7;
 int nextVoice = 0;
-int currentKeyIndex = 0;
-const char* keyNames[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-int majorScale[] = {0, 2, 4, 5, 7, 9, 11}; 
-const char* noteFiles[] = {"C.wav", "C#.wav", "D.wav", "D#.wav", "E.wav", "F.wav", "F#.wav", "G.wav", "G#.wav", "A.wav", "A#.wav", "B.wav"};
+
+// ====================== FUNCTIONS ======================
+void freeSamples() {
+  for(int i = 0; i < 12; i++) {
+    if(samples[i].data) {
+      free((void*)samples[i].data);
+      samples[i].data = nullptr;
+    }
+  }
+}
+
+void loadScaleForKey(int key) {
+  freeSamples();
+  Serial.printf("\n[SCALE] Loading notes for %s\n", rootNotes[key]);
+  
+  for(int i = 0; i < 12; i++) {
+    int noteIdx = (key + i) % 12;
+    char path[32];
+    snprintf(path, sizeof(path), "piano00/%s.raw", rootNotes[noteIdx]);
+    
+    File f = SD.open(path);
+    if(f) {
+      uint32_t bytes = f.size();
+      uint32_t* buf = (uint32_t*)malloc(bytes + 4);
+      if(buf) {
+        buf[0] = (0x81UL << 24) | (bytes/2);
+        f.read((uint8_t*)buf + 4, bytes);
+        f.close();
+        samples[i].data = (const unsigned int*)buf;
+        samples[i].len = bytes/2;
+        Serial.printf("  Loaded: %s\n", rootNotes[noteIdx]);
+      }
+    }
+  }
+}
+
+void loadChordsForKey(int key) {
+  freeSamples();
+  Serial.printf("\n[CHORD] Loading chords for %s\n", rootNotes[key]);
+  
+  const char* chordTypes[3] = {"major", "minor", "dim"};
+  
+  for(int i = 0; i < 3; i++) {
+    char path[48];
+    snprintf(path, sizeof(path), "chords/%s_%s.raw", rootNotes[key], chordTypes[i]);
+    
+    File f = SD.open(path);
+    if(f) {
+      uint32_t bytes = f.size();
+      uint32_t* buf = (uint32_t*)malloc(bytes + 4);
+      if(buf) {
+        buf[0] = (0x81UL << 24) | (bytes/2);
+        f.read((uint8_t*)buf + 4, bytes);
+        f.close();
+        samples[i].data = (const unsigned int*)buf;
+        samples[i].len = bytes/2;
+        Serial.printf("  Loaded: %s_%s\n", rootNotes[key], chordTypes[i]);
+      }
+    } else {
+      Serial.print("Missing: "); Serial.println(path);
+    }
+  }
+}
+
+void playSample(int index) {
+  if (index < 0 || index >= 12 || samples[index].data == nullptr) return;
+  
+  players[nextVoice].play(samples[index].data);
+  nextVoice = (nextVoice + 1) % numPlayers;
+  Serial.printf("Playing sample %d\n", index);
+}
 
 void setup() {
   Serial.begin(9600);
-  AudioMemory(500);
+  delay(1000);
+  Serial.println("=== GrooveBan Mode System ===");
+
+  AudioMemory(350);
   sgtl5000_1.enable();
   sgtl5000_1.volume(volume);
 
-  Bassmixer4.gain(0, 0.8); 
-  mixer5.gain(0, 0.8); mixer5.gain(1, 0.8); mixer5.gain(2, 0.8); mixer5.gain(3, 0.8);
-  Pianomixer3.gain(0, 0.8); Pianomixer1.gain(0, 0.8); mixer2.gain(0, 0.8);
-  
-  if (!(SD.begin(BUILTIN_SDCARD))) Serial.println("SD Error");
-  Serial.println("SD Initialized. Listing files:");
-    File root = SD.open("/");
-    printDirectory(root, 0);
-    root.close();
-  for(int i = 0; i < numButtons; i++) pinMode(buttonPins[i], INPUT_PULLUP);
+  for(int i=0; i<4; i++) mixer.gain(i, 0.85);
+
+  for(int i = 0; i < numPlayers; i++) {
+    patchCords[i] = new AudioConnection(players[i], 0, mixer, i%4);
+  }
+  patchCords[5] = new AudioConnection(mixer, 0, i2s1, 0);
+  patchCords[6] = new AudioConnection(mixer, 0, i2s1, 1);
+
+  if(SD.begin(BUILTIN_SDCARD)) {
+    loadScaleForKey(currentKey);
+  }
+
+  Serial.printf("Mode: %s | Key: %s\n", modeNames[currentMode], rootNotes[currentKey]);
 }
 
 void loop() {
-  debug();
-  handleButtons();
-}
-
-void debug(){
   if (debugTimer.check()) {
-    Serial.print("Proc: "); Serial.print(AudioProcessorUsage());
+    Serial.print("CPU: "); Serial.print(AudioProcessorUsage());
     Serial.print("% | Mem: "); Serial.println(AudioMemoryUsage());
   }
-}
 
-void handleButtons() {
-  for (int i = 0; i < numButtons; i++) {
+  // Encoder - Key change
+  long pos = enc.read() / 4;
+  if (pos != lastEncPos) {
+    currentKey = (currentKey + (pos - lastEncPos) + 12) % 12;
+    lastEncPos = pos;
+    
+    if (currentMode == SCALE_MODE) loadScaleForKey(currentKey);
+    else if (currentMode == CHORD_MODE) loadChordsForKey(currentKey);
+    
+    Serial.printf("→ Key: %s\n", rootNotes[currentKey]);
+  }
+
+  // Buttons
+  for(int i = 0; i < numButtons; i++) {
     buttons[i].update();
-    if (buttons[i].fallingEdge()) {
-      playChord(i); 
+    if(buttons[i].fallingEdge()) {
+      Serial.printf("Button %d in %s mode\n", i, modeNames[currentMode]);
+      
+      if (currentMode == SCALE_MODE) {
+        playSample(i);                    // individual note
+      } else if (currentMode == CHORD_MODE) {
+        playSample(i % 8);                // pre-made chord
+      }
     }
-  }
-}
-
-
-void playVoice(int semitone) {
-  int targetNote = (currentKeyIndex + semitone) % 12;
-  
-  // Toggle the folder selection
-  useFolder01 = !useFolder01;
-  
-  // Construct the path string dynamically
-  char filename[32];
-  if (useFolder01) {
-    snprintf(filename, sizeof(filename), "piano01/%s", noteFiles[targetNote]);
-  } else {
-    snprintf(filename, sizeof(filename), "piano00/%s", noteFiles[targetNote]);
-  }
-
-  // 1. Check if the file exists in the selected folder
-  
-    Serial.print("Playing: ");
-    Serial.println(filename);
-    
-    // 2. Play the sound
-    players[nextVoice].stop();
-    players[nextVoice].play(filename);
-    
-    nextVoice = (nextVoice + 1) % numPlayers;
-  
-}
-void playChord(int rootDegree) {
-  if (millis() - lastChordTime < SD_COOLDOWN) return;
-  
-  playVoice(majorScale[rootDegree % 7]);
-  playVoice(majorScale[(rootDegree + 2) % 7]);
-  playVoice(majorScale[(rootDegree + 4) % 7]);
-  
-  lastChordTime = millis();
-}
-void printDirectory(File dir, int numTabs) {
-  while (true) {
-    File entry = dir.openNextFile();
-    if (!entry) {
-      // No more files
-      break;
-    }
-    for (uint8_t i = 0; i < numTabs; i++) {
-      Serial.print('\t');
-    }
-    Serial.print(entry.name());
-    if (entry.isDirectory()) {
-      Serial.println("/");
-      printDirectory(entry, numTabs + 1);
-    } else {
-      // Print file size
-      Serial.print("\t\t");
-      Serial.println(entry.size(), DEC);
-    }
-    entry.close();
   }
 }
 /*
