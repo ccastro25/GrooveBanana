@@ -118,7 +118,7 @@ void playVoice(int semitone) {
   }
 
   // 1. Check if the file exists in the selected folder
-  if (SD.exists(filename)) {
+  
     Serial.print("Playing: ");
     Serial.println(filename);
     
@@ -127,10 +127,7 @@ void playVoice(int semitone) {
     players[nextVoice].play(filename);
     
     nextVoice = (nextVoice + 1) % numPlayers;
-  } else {
-    Serial.print("File not found: ");
-    Serial.println(filename);
-  }
+  
 }
 void playChord(int rootDegree) {
   if (millis() - lastChordTime < SD_COOLDOWN) return;
